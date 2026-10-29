@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Bookmarks</title>
+<style>body{font-family:system-ui,sans-serif;max-width:760px;margin:2rem auto;padding:0 1rem}input{padding:.4rem;margin:.2rem}li{margin:.5rem 0}.tag{background:#eef;border-radius:4px;padding:0 .4rem;margin-right:.3rem;cursor:pointer;font-size:.85em}#err{color:#b00}</style>
+</head><body>
+<h1>Bookmarks</h1>
+<form id="add"><input id="url" placeholder="https://..." required><input id="title" placeholder="Title" required><input id="tags" placeholder="tags, comma, separated"><button>Add</button></form>
+<div id="err"></div>
+<p><input id="q" placeholder="Search"><input id="tag" placeholder="Filter by tag"><button id="clear">Clear</button> <a href="/api/export">Export CSV</a></p>
+<p id="total"></p><ul id="list"></ul>
+<script>
+const $=id=>document.getElementById(id);
+async function load(){const p=new URLSearchParams();if($('q').value)p.set('q',$('q').value);if($('tag').value)p.set('tag',$('tag').value);p.set('limit','100');
+const r=await fetch('/api/bookmarks?'+p);const items=await r.json();$('total').textContent=(r.headers.get('X-Total-Count')||0)+' bookmark(s)';
+$('list').innerHTML='';for(const b of items){const li=document.createElement('li');const a=document.createElement('a');a.href=b.url;a.textContent=b.title;a.target='_blank';li.append(a,' ');
+for(const t of b.tags){const s=document.createElement('span');s.className='tag';s.textContent=t;s.onclick=()=>{$('tag').value=t;load()};li.append(s)}
+const d=document.createElement('button');d.textContent='Delete';d.onclick=async()=>{await fetch('/api/bookmarks/'+b.id,{method:'DELETE'});load()};li.append(' ',d);$('list').append(li)}}
+$('add').onsubmit=async e=>{e.preventDefault();$('err').textContent='';const tags=$('tags').value.split(',').map(s=>s.trim()).filter(Boolean);
+const r=await fetch('/api/bookmarks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('url').value,title:$('title').value,tags})});
+if(!r.ok){$('err').textContent=(await r.json()).error;return}e.target.reset();load()};
+$('q').oninput=load;$('tag').oninput=load;$('clear').onclick=()=>{$('q').value='';$('tag').value='';load()};load();
+</script></body></html>

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ds-claude — Claude Code running entirely on DeepSeek V4.1 Flash (no Claude plan usage, no Anthropic API)
+#             Claude Code che gira interamente su DeepSeek V4.1 Flash (nessuna quota Claude, nessuna API Anthropic)
+# Same arguments as `claude` / stessi argomenti di `claude`:  ds-claude   ·   ds-claude -p "fix the failing test"
+set -euo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$HERE/ds-env.sh"
+exec claude --disallowedTools "$CREW_DISALLOWED" "$@"

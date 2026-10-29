@@ -1,0 +1,1 @@
+5. Time matters: when the work splits into independent parts (different modules/files), delegate them IN PARALLEL with `ds-worker-batch` (one task file per part) instead of one after the other. Set up shared foundations first (one worker), then fan out.

@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Room Booking</title>
+<style>body{font-family:system-ui,sans-serif;max-width:900px;margin:1em auto;padding:0 16px}section{border:1px solid #ccc;padding:.8em;margin:.8em 0;border-radius:6px}input,select,button{margin:.2em}li{margin:.2em 0}.err{color:#b00}</style></head>
+<body><h1>Room Booking</h1><div id="msg" class="err"></div>
+<section id="auth"><h2>Login / Register</h2>
+<input id="email" placeholder="email"><input id="pw" type="password" placeholder="password"><input id="name" placeholder="name (register)">
+<button onclick="login()">Login</button><button onclick="register()">Register</button></section>
+<section id="app" hidden><div>Logged in as <b id="who"></b> <button onclick="logout()">Logout</button></div>
+<h2>Rooms</h2><ul id="rooms"></ul>
+<div id="admin" hidden><h3>New room (admin)</h3><input id="rname" placeholder="name"><input id="rtz" placeholder="Europe/Rome" value="Europe/Rome"><input id="ropen" value="08:00"><input id="rclose" value="18:00"><button onclick="createRoom()">Create</button></div>
+<div id="roomview" hidden><h2 id="rtitle"></h2>
+<label>Date <input id="day" type="date"></label><label>Duration <input id="dur" type="number" value="60" step="15" min="15" max="240"></label>
+<button onclick="loadDay()">Show bookings &amp; availability</button>
+<h3>Bookings</h3><ul id="bookings"></ul><h3>Free slots</h3><div id="slots"></div>
+<h3>New booking</h3><input id="btitle" placeholder="title"><input id="bstart" placeholder="HH:MM local" value="09:00">
+<select id="bfreq"><option value="">no repeat</option><option>daily</option><option>weekly</option></select><input id="bcount" type="number" value="1" min="1" max="52">
+<button onclick="book()">Book</button></div></section>
+<script>
+let token=localStorage.getItem('tok'),me=JSON.parse(localStorage.getItem('me')||'null'),room=null;
+const $=id=>document.getElementById(id),msg=t=>$('msg').textContent=t||'';
+async function api(m,u,b){const r=await fetch(u,{method:m,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:b?JSON.stringify(b):undefined});
+ const d=r.status===204?null:await r.json();if(!r.ok)throw new Error(d.error+(d.conflicts?': '+d.conflicts.join(', '):''));return d}
+async function login(){try{const d=await api('POST','/api/auth/login',{email:$('email').value,password:$('pw').value});token=d.token;me=d.user;localStorage.setItem('tok',token);localStorage.setItem('me',JSON.stringify(me));show()}catch(e){msg(e.message)}}
+async function register(){try{await api('POST','/api/auth/register',{email:$('email').value,password:$('pw').value,name:$('name').value});await login()}catch(e){msg(e.message)}}
+function logout(){token=null;localStorage.clear();location.reload()}
+async function show(){msg();if(!token)return;$('auth').hidden=true;$('app').hidden=false;$('who').textContent=me.name+' ('+me.role+')';$('admin').hidden=me.role!=='admin';
+ try{const rs=await api('GET','/api/rooms');$('rooms').innerHTML='';rs.forEach(r=>{const li=document.createElement('li');li.innerHTML=`<a href="#">${esc(r.name)}</a> — ${r.timezone} ${r.openTime}–${r.closeTime}`;li.querySelector('a').onclick=e=>{e.preventDefault();pick(r)};$('rooms').append(li)})}catch(e){logout()}}
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function createRoom(){try{await api('POST','/api/rooms',{name:$('rname').value,timezone:$('rtz').value,openTime:$('ropen').value,closeTime:$('rclose').value});show()}catch(e){msg(e.message)}}
+function pick(r){room=r;$('roomview').hidden=false;$('rtitle').textContent=r.name+' ('+r.timezone+')';if(!$('day').value)$('day').value=new Date().toISOString().slice(0,10);loadDay()}
+const fmt=iso=>new Intl.DateTimeFormat('en-GB',{timeZone:room.timezone,hour:'2-digit',minute:'2-digit'}).format(new Date(iso));
+function offsetFor(date,hm){// find UTC offset of room tz at that local time
+ const guess=new Date(date+'T'+hm+':00Z');const p=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:room.timezone,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).formatToParts(guess).map(x=>[x.type,x.value]));
+ let off=(Date.UTC(p.year,p.month-1,p.day,p.hour,p.minute)-guess.getTime())/60000;const sg=off<0?'-':'+';off=Math.abs(off);return sg+String(Math.floor(off/60)).padStart(2,'0')+':'+String(off%60).padStart(2,'0')}
+async function loadDay(){msg();const d=$('day').value;try{
+ const from=d+'T00:00:00'+offsetFor(d,'00:00'),to=d+'T23:59:00'+offsetFor(d,'23:59');
+ const bs=await api('GET',`/api/rooms/${room.id}/bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+ $('bookings').innerHTML='';bs.forEach(b=>{const li=document.createElement('li');li.textContent=`${fmt(b.start)}–${fmt(b.end)} ${b.title} (user ${b.userId})`;
+  if(b.userId===me.id||me.role==='admin'){const x=document.createElement('button');x.textContent='delete';x.onclick=async()=>{try{await api('DELETE','/api/bookings/'+b.id);loadDay()}catch(e){msg(e.message)}};li.append(x);
+   if(b.seriesId){const y=document.createElement('button');y.textContent='delete this & later';y.onclick=async()=>{try{await api('DELETE','/api/bookings/'+b.id+'?scope=series');loadDay()}catch(e){msg(e.message)}};li.append(y)}}
+  $('bookings').append(li)});
+ const av=await api('GET',`/api/rooms/${room.id}/availability?date=${d}&duration=${$('dur').value}`);$('slots').textContent=av.slots.join('  ')||'none'}catch(e){msg(e.message)}}
+async function book(){msg();const d=$('day').value,hm=$('bstart').value,dur=+$('dur').value;
+ const [h,m]=hm.split(':').map(Number);const em=h*60+m+dur;const ehm=String(Math.floor(em/60)).padStart(2,'0')+':'+String(em%60).padStart(2,'0');
+ const body={title:$('btitle').value,start:d+'T'+hm+':00'+offsetFor(d,hm),end:d+'T'+ehm+':00'+offsetFor(d,ehm)};
+ if($('bfreq').value)body.recurrence={freq:$('bfreq').value,count:+$('bcount').value};
+ try{await api('POST',`/api/rooms/${room.id}/bookings`,body);loadDay()}catch(e){msg(e.message)}}
+show();
+</script></body></html>

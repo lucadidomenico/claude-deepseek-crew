@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Team Kanban</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;padding:16px;background:#f4f5f7;color:#222}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.col{background:#e9ebee;border-radius:6px;padding:8px;min-height:120px}
+.card{background:#fff;border-radius:4px;padding:8px;margin:6px 0;box-shadow:0 1px 2px #0002}
+.card button{font-size:12px}#err{color:#b00}li{cursor:pointer;color:#0645ad}.hidden{display:none}
+input,button{margin:2px;padding:4px}
+</style></head><body>
+<h1>Team Kanban</h1><div id="err"></div>
+<section id="auth">
+  <input id="email" placeholder="email"><input id="password" type="password" placeholder="password (min 8)">
+  <button onclick="register()">Register</button><button onclick="login()">Log in</button>
+</section>
+<section id="app" class="hidden">
+  <p>Logged in as <b id="me"></b> <button onclick="logout()">Log out</button></p>
+  <h2>Boards</h2><ul id="boards"></ul>
+  <input id="bname" placeholder="new board name"><input id="bwip" placeholder="WIP limit (optional)" size="8">
+  <button onclick="createBoard()">Create board</button>
+  <div id="board" class="hidden"><h2 id="btitle"></h2>
+    <input id="memail" placeholder="member email"><button onclick="addMember()">Add member</button> <span id="members"></span>
+    <p><input id="ctitle" placeholder="card title"><button onclick="addCard()">Add card</button></p>
+    <div class="cols" id="cols"></div></div>
+</section>
+<script>
+const COLS=['todo','doing','done'];let token=localStorage.getItem('token'),cur=null;
+const $=id=>document.getElementById(id);
+async function api(m,u,b){const r=await fetch(u,{method:m,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:b?JSON.stringify(b):undefined});
+ const d=r.status===204?null:await r.json();if(!r.ok){$('err').textContent=d.error;if(r.status===401&&!u.startsWith('/api/auth')){token=null;localStorage.removeItem('token');show();}throw d}$('err').textContent='';return d}
+const creds=()=>({email:$('email').value,password:$('password').value});
+async function register(){await api('POST','/api/auth/register',creds());await login()}
+async function login(){const d=await api('POST','/api/auth/login',creds());token=d.token;localStorage.setItem('token',token);show()}
+async function logout(){await api('POST','/api/auth/logout').catch(()=>{});token=null;localStorage.removeItem('token');show()}
+async function show(){if(!token){$('auth').classList.remove('hidden');$('app').classList.add('hidden');return}
+ try{const me=await api('GET','/api/me');$('me').textContent=me.email}catch{return}
+ $('auth').classList.add('hidden');$('app').classList.remove('hidden');loadBoards()}
+async function loadBoards(){const bs=await api('GET','/api/boards');$('boards').innerHTML='';
+ bs.forEach(b=>{const li=document.createElement('li');li.textContent=b.name+(b.wipLimit?` (WIP ${b.wipLimit})`:'');li.onclick=()=>openBoard(b.id);$('boards').append(li)})}
+async function createBoard(){const w=$('bwip').value.trim();await api('POST','/api/boards',{name:$('bname').value,wipLimit:w?Number(w):null});$('bname').value='';loadBoards()}
+async function openBoard(id){cur=id;const b=await api('GET','/api/boards/'+id);$('board').classList.remove('hidden');
+ $('btitle').textContent=b.name+(b.wipLimit?` - WIP limit ${b.wipLimit}`:'');$('members').textContent='Members: '+b.members.map(m=>m.email).join(', ');loadCards()}
+async function addMember(){await api('POST',`/api/boards/${cur}/members`,{email:$('memail').value});openBoard(cur)}
+async function addCard(){await api('POST',`/api/boards/${cur}/cards`,{title:$('ctitle').value});$('ctitle').value='';loadCards()}
+async function move(c,patch){await api('PATCH','/api/cards/'+c.id,patch).catch(()=>{});loadCards()}
+async function del(c){await api('DELETE','/api/cards/'+c.id);loadCards()}
+async function loadCards(){const d=await api('GET',`/api/boards/${cur}/cards`);const root=$('cols');root.innerHTML='';
+ COLS.forEach((col,ci)=>{const div=document.createElement('div');div.className='col';div.innerHTML=`<h3>${col}</h3>`;
+  d[col].forEach(c=>{const e=document.createElement('div');e.className='card';const t=document.createElement('div');t.textContent=c.title;e.append(t);
+   const btn=(l,f)=>{const b=document.createElement('button');b.textContent=l;b.onclick=f;e.append(b)};
+   if(ci>0)btn('◀',()=>move(c,{column:COLS[ci-1]}));btn('▲',()=>move(c,{position:c.position-1}));btn('▼',()=>move(c,{position:c.position+1}));
+   if(ci<2)btn('▶',()=>move(c,{column:COLS[ci+1]}));btn('✕',()=>del(c));div.append(e)});root.append(div)})}
+show();
+</script></body></html>

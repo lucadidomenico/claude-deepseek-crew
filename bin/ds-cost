@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""ds-cost — real DeepSeek cost of the developer sessions in ./.crew (or the given dir).
+Claude Code's own cost counter uses Claude prices and is wrong for DeepSeek: this uses the DeepSeek list price.
+Prices: api-docs.deepseek.com/quick_start/pricing (checked 2026-10-28). Peak (x2): 01-04 and 06-10 UTC, Mon-Fri."""
+import datetime as dt, glob, json, os, sys
+PRICE = {"miss": 0.15, "hit": 0.003, "out": 0.60}   # $/M tokens, off-peak, deepseek-flash
+_lang = os.environ.get("CREW_LANG") or os.environ.get("LC_ALL") or os.environ.get("LC_MESSAGES") or os.environ.get("LANG") or ""
+IT = _lang.lower().startswith("it")
+def t(it, en): return it if IT else en
+
+def peak(ts):
+    t = dt.datetime.fromtimestamp(ts, dt.timezone.utc)
+    return t.weekday() < 5 and (1 <= t.hour < 4 or 6 <= t.hour < 10)
+
+def session_cost(path):
+    res = None; ts = os.path.getmtime(path); sid = None
+    for line in open(path, errors="replace"):
+        try: j = json.loads(line)
+        except Exception: continue
+        sid = j.get("session_id") or sid
+        if j.get("type") == "result": res = j
+    tok = {"miss": 0, "hit": 0, "out": 0}
+    for u in ((res or {}).get("modelUsage") or {}).values():
+        tok["miss"] += u.get("inputTokens", 0); tok["hit"] += u.get("cacheReadInputTokens", 0); tok["out"] += u.get("outputTokens", 0)
+    k = 2 if peak(ts) else 1
+    return res, sid, tok, k * sum(tok[x] * PRICE[x] for x in tok) / 1e6
+
+if len(sys.argv) > 1 and sys.argv[1] == "--report":
+    path, sidf, wid, rc, dur = sys.argv[2:7]
+    res, sid, tok, cost = session_cost(path)
+    if sid: open(sidf, "w").write(sid)
+    turns = res.get("num_turns") if res else "?"
+    print(t(f"=== sviluppatore {wid} ha finito (exit {rc}, {dur}s, {turns} turni, DeepSeek ${cost:.4f}) ===",
+            f"=== developer {wid} finished (exit {rc}, {dur}s, {turns} turns, DeepSeek ${cost:.4f}) ==="))
+    print((res or {}).get("result") or t("(nessun report finale: lo sviluppatore si è interrotto o è scaduto il tempo)",
+                                       "(no final report: the developer crashed or timed out)"))
+    print(t(f'=== per altro lavoro allo stesso sviluppatore (mantiene il contesto): ds-worker --resume {wid} "..." ===',
+            f'=== more work for the same developer (keeps its context): ds-worker --resume {wid} "..." ==='))
+    sys.exit(0 if res and not res.get("is_error") and rc == "0" else 1)
+
+d = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.getcwd(), ".crew")
+tot = 0.0; T = {"miss": 0, "hit": 0, "out": 0}
+for f in sorted(glob.glob(os.path.join(d, "w*.jsonl"))):
+    _, _, tok, c = session_cost(f); tot += c
+    for k in T: T[k] += tok[k]
+    print(f"{os.path.basename(f)[:-6]}: ${c:.4f}  (input {tok['miss']:,} + cache {tok['hit']:,}, output {tok['out']:,})")
+print(f"{t('TOTALE', 'TOTAL')}: ${tot:.4f}  (input {T['miss']:,} + cache {T['hit']:,}, output {T['out']:,})")

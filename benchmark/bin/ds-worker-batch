@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# ds-worker-batch — run several ds-worker tasks IN PARALLEL and wait for all of them.
+# Usage: ds-worker-batch task1.md task2.md ...   (each file = one independent task)
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+TMP=$(mktemp -d); i=0
+for f in "$@"; do i=$((i+1)); "$HERE/ds-worker" -f "$f" > "$TMP/$i.out" 2>&1 & sleep 1; done
+wait
+i=0; for f in "$@"; do i=$((i+1)); echo "##### task file: $f"; cat "$TMP/$i.out"; done
+rm -rf "$TMP"

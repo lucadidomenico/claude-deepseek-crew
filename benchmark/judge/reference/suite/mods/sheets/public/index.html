@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheets</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --line:#d0d0d5; --head:#f2f2f5; --sel:#2f6feb; --err:#c0392b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17181b; --fg:#e6e6e9; --line:#3a3b40; --head:#222327; --sel:#5b8cff; --err:#ff6b5b; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  header { display:flex; gap:8px; align-items:center; padding:8px 12px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  select, input, button { font:inherit; color:inherit; background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:4px 8px; }
+  #bar { display:flex; gap:8px; padding:6px 12px; border-bottom:1px solid var(--line); }
+  #addr { width:64px; text-align:center; font-weight:600; }
+  #formula { flex:1; font-family:ui-monospace, monospace; }
+  #wrap { overflow:auto; height:calc(100vh - 92px); }
+  table { border-collapse:collapse; table-layout:fixed; }
+  th, td { border:1px solid var(--line); height:24px; padding:0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  th { background:var(--head); font-weight:500; position:sticky; top:0; z-index:1; }
+  th.rh { position:sticky; left:0; width:44px; z-index:2; }
+  td { width:96px; min-width:96px; max-width:96px; cursor:cell; }
+  td.num { text-align:right; } td.error { color:var(--err); } td.boolean { text-align:center; }
+  td.sel { outline:2px solid var(--sel); outline-offset:-2px; }
+</style>
+</head>
+<body>
+<header>
+  <strong>Sheets</strong>
+  <select id="sheet"></select>
+  <input id="newname" placeholder="New sheet name">
+  <button id="create">Create</button>
+  <button id="csv">Export CSV</button>
+</header>
+<div id="bar"><input id="addr" readonly value="A1"><input id="formula" placeholder="Input (Enter to save)"></div>
+<div id="wrap"><table id="grid"></table></div>
+<script>
+const COLS = 26, ROWS = 100;
+let sheetId = null, cells = {}, sel = 'A1';
+const $ = (id) => document.getElementById(id);
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (r.status === 204) return null;
+  const j = await r.json(); if (!r.ok) throw new Error(j.error); return j;
+}
+function buildGrid() {
+  let h = '<tr><th class="rh"></th>';
+  for (let c = 0; c < COLS; c++) h += '<th>' + String.fromCharCode(65 + c) + '</th>';
+  h += '</tr>';
+  for (let r = 1; r <= ROWS; r++) {
+    h += '<tr><th class="rh">' + r + '</th>';
+    for (let c = 0; c < COLS; c++) h += '<td data-ref="' + String.fromCharCode(65 + c) + r + '"></td>';
+    h += '</tr>';
+  }
+  $('grid').innerHTML = h;
+}
+function render() {
+  document.querySelectorAll('#grid td').forEach((td) => {
+    const cell = cells[td.dataset.ref];
+    td.className = (cell ? (cell.type === 'number' ? 'num' : cell.type) : '') + (td.dataset.ref === sel ? ' sel' : '');
+    td.textContent = !cell || cell.value === null ? '' : cell.type === 'boolean' ? (cell.value ? 'TRUE' : 'FALSE') : String(cell.value);
+  });
+  $('addr').value = sel; $('formula').value = cells[sel] ? cells[sel].input : '';
+}
+async function loadSheets(selectId) {
+  let list = await api('GET', '/api/sheets');
+  if (!list.length) { await api('POST', '/api/sheets', { name: 'Sheet 1' }); list = await api('GET', '/api/sheets'); }
+  $('sheet').innerHTML = list.map((s) => '<option value="' + s.id + '">' + s.name.replace(/</g, '&lt;') + '</option>').join('');
+  sheetId = selectId || sheetId || list[0].id; $('sheet').value = sheetId; await refresh();
+}
+async function refresh() { cells = (await api('GET', '/api/sheets/' + sheetId)).cells; render(); }
+$('grid').addEventListener('click', (e) => { const td = e.target.closest('td'); if (td) { sel = td.dataset.ref; render(); $('formula').focus(); } });
+$('formula').addEventListener('keydown', async (e) => {
+  if (e.key !== 'Enter') return;
+  try { await api('PUT', '/api/sheets/' + sheetId + '/cells/' + sel, { input: $('formula').value }); } catch (err) { alert(err.message); }
+  const m = /^([A-Z])(\d+)$/.exec(sel); if (+m[2] < ROWS) sel = m[1] + (+m[2] + 1);
+  await refresh();
+});
+$('sheet').addEventListener('change', () => { sheetId = +$('sheet').value; refresh(); });
+$('create').addEventListener('click', async () => {
+  try { const s = await api('POST', '/api/sheets', { name: $('newname').value }); $('newname').value = ''; await loadSheets(s.id); } catch (err) { alert(err.message); }
+});
+$('csv').addEventListener('click', () => { window.open('/api/sheets/' + sheetId + '/export.csv'); });
+buildGrid(); loadSheets();
+</script>
+</body>
+</html>

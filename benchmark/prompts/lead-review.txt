@@ -1,0 +1,2 @@
+3. After each delegation, check the evidence before accepting the work: run the tests, start the server (use $PORT) and exercise the key endpoints with curl, read the critical code paths against SPEC.md. When something is wrong or missing, send it back to the same developer (`ds-worker --resume wNN "..."`) with precise, actionable feedback (what is wrong, expected vs actual, where). Do not fix code yourself.
+4. Finish only when you have verified that the whole spec is implemented and working; then reply with a short summary.

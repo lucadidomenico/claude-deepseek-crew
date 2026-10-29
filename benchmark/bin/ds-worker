@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# ds-worker — delegate a coding task to a Claude Code session running on DeepSeek V4.1 Flash.
+# Usage:
+#   ds-worker "task text"            new worker session in the current directory
+#   ds-worker -f task.md             task read from file
+#   ds-worker --resume wNN "text"    continue an earlier worker session (keeps its context)
+# Prints the worker's final report and its id (wNN). Exit code != 0 if the worker failed.
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+RUN_DIR="${DS_RUN_DIR:?DS_RUN_DIR not set}"
+mkdir -p "$RUN_DIR/workers"
+RESUME=""; TASK=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resume) RESUME="$2"; shift 2;;
+    -f) TASK="$(cat "$2")"; shift 2;;
+    *) TASK="$1"; shift;;
+  esac
+done
+[ -z "$TASK" ] && { echo "ds-worker: empty task" >&2; exit 2; }
+exec 9>"$RUN_DIR/workers/.lock"; flock 9
+N=$(( $(ls "$RUN_DIR/workers" | grep -c '^w[0-9]*\.jsonl$') + 1 )); ID=$(printf 'w%02d' "$N")
+flock -u 9
+EXTRA=()
+if [ -n "$RESUME" ]; then
+  SID=$(cat "$RUN_DIR/workers/$RESUME.sid" 2>/dev/null) || { echo "ds-worker: unknown worker $RESUME" >&2; exit 2; }
+  EXTRA=(--resume "$SID")
+fi
+printf '%s\n' "$TASK" > "$RUN_DIR/workers/$ID.task.md"
+[ -n "$RESUME" ] && echo "resume-of: $RESUME" >> "$RUN_DIR/workers/$ID.task.md"
+SYS="You are a software developer working on a task assigned by a tech lead. Work autonomously: nobody will answer questions. Implement the task completely, run the relevant tests/commands to verify your work, and do not stop until it is done. When finished, reply with a concise report: what you changed (files), how you verified it (commands + results), and anything left open or uncertain. Use the PORT environment variable (\$PORT) for any server you start for manual testing, and stop servers you started before finishing."
+T0=$(date +%s)
+(
+  DS_CONFIG_DIR="$RUN_DIR/ds-config" . "$HERE/ds-env.sh"
+  mkdir -p "$CLAUDE_CONFIG_DIR"
+  # the task goes through stdin, not argv: keeps it out of `ps`/`pkill -f` matching
+  printf '%s' "$TASK" | timeout "${DS_WORKER_TIMEOUT:-2700}" claude -p "${EXTRA[@]}" --safe-mode --permission-mode bypassPermissions \
+    --disallowedTools "WebSearch WebFetch" --append-system-prompt "$SYS" \
+    --output-format stream-json --verbose > "$RUN_DIR/workers/$ID.jsonl" 2> "$RUN_DIR/workers/$ID.err"
+)
+RC=$?
+python3 - "$RUN_DIR/workers/$ID.jsonl" "$RUN_DIR/workers/$ID.sid" "$ID" "$RC" "$(( $(date +%s) - T0 ))" <<'PY'
+import json, sys
+path, sidf, wid, rc, dur = sys.argv[1:]
+res = None; sid = None
+for line in open(path):
+    try: j = json.loads(line)
+    except Exception: continue
+    sid = j.get("session_id") or sid
+    if j.get("type") == "result": res = j
+if sid: open(sidf, "w").write(sid)
+print(f"=== worker {wid} finished (exit {rc}, {dur}s, {res.get('num_turns') if res else '?'} turns) ===")
+print((res or {}).get("result") or "(no final report — the worker crashed or timed out)")
+print(f"=== to send follow-up work to the same worker (keeps its context): ds-worker --resume {wid} \"...\" ===")
+sys.exit(0 if res and not res.get("is_error") and rc == "0" else 1)
+PY

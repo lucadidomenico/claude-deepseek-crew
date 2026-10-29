@@ -1,0 +1,42 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Splitter</title>
+<style>body{font-family:system-ui;max-width:720px;margin:20px auto;padding:0 16px}section{border:1px solid #ccc;padding:10px;margin:10px 0;border-radius:6px}input,select,button{margin:3px}#msg{color:#b00}</style></head><body>
+<h1>Splitter</h1><div id="msg"></div>
+<section id="authSec"><h2>Register / Login</h2>
+<input id="email" placeholder="email"><input id="password" type="password" placeholder="password"><input id="name" placeholder="name (register)">
+<button id="registerBtn">Register</button><button id="loginBtn">Log in</button></section>
+<section id="appSec" hidden><div>Logged in as <b id="me"></b> <button id="logoutBtn">Log out</button></div>
+<h2>Groups</h2><input id="groupName" placeholder="group name"><button id="createGroupBtn">Create group</button>
+<select id="groupSel"></select>
+<div id="groupBox" hidden>
+<h3>Members</h3><ul id="members"></ul><input id="memberEmail" placeholder="member email"><button id="addMemberBtn">Add member</button>
+<h3>Add equal-split expense</h3><input id="expDesc" placeholder="description"><input id="expAmount" placeholder="amount (e.g. 12.50)">
+<select id="expPaidBy"></select><input id="expDate" type="date"><button id="addExpenseBtn">Add expense</button>
+<h3>Expenses</h3><ul id="expenses"></ul><h3>Balances</h3><ul id="balances"></ul><h3>Suggested settlements</h3><ul id="settlements"></ul>
+</div></section>
+<script>
+const $=id=>document.getElementById(id);let token=localStorage.getItem('tok'),user=JSON.parse(localStorage.getItem('user')||'null'),group=null;
+const fmt=c=>(c/100).toFixed(2);
+async function api(method,url,body){const r=await fetch(url,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:body?JSON.stringify(body):undefined});
+ if(r.status===204)return null;const d=await r.json();if(!r.ok)throw new Error(d.error||r.status);return d;}
+function err(e){$('msg').textContent=e.message||e}
+function li(ul,t){const l=document.createElement('li');l.textContent=t;ul.appendChild(l)}
+async function show(){$('msg').textContent='';$('authSec').hidden=!!token;$('appSec').hidden=!token;if(!token)return;$('me').textContent=user.name+' <'+user.email+'>';
+ const gs=await api('GET','/api/groups');const sel=$('groupSel');sel.innerHTML='';gs.forEach(g=>{const o=document.createElement('option');o.value=g.id;o.textContent=g.name;sel.appendChild(o)});
+ if(gs.length){if(!group||!gs.find(g=>g.id==group))group=gs[0].id;sel.value=group;await loadGroup()}else $('groupBox').hidden=true}
+async function loadGroup(){const g=await api('GET','/api/groups/'+group);$('groupBox').hidden=false;const names={};
+ $('members').innerHTML='';$('expPaidBy').innerHTML='';g.members.forEach(m=>{names[m.id]=m.name;li($('members'),m.name+' ('+m.email+')');const o=document.createElement('option');o.value=m.id;o.textContent=m.name;$('expPaidBy').appendChild(o)});
+ $('expPaidBy').value=user.id;
+ $('expenses').innerHTML='';(await api('GET','/api/groups/'+group+'/expenses')).forEach(e=>li($('expenses'),e.date+' '+e.description+' '+fmt(e.amountCents)+' paid by '+names[e.paidBy]));
+ $('balances').innerHTML='';(await api('GET','/api/groups/'+group+'/balances')).forEach(b=>li($('balances'),b.name+': '+fmt(b.balanceCents)));
+ $('settlements').innerHTML='';(await api('GET','/api/groups/'+group+'/settlements')).forEach(s=>li($('settlements'),names[s.fromUserId]+' pays '+names[s.toUserId]+' '+fmt(s.amountCents)));}
+$('registerBtn').onclick=async()=>{try{await api('POST','/api/auth/register',{email:$('email').value,password:$('password').value,name:$('name').value});await $('loginBtn').onclick()}catch(e){err(e)}};
+$('loginBtn').onclick=async()=>{try{const d=await api('POST','/api/auth/login',{email:$('email').value,password:$('password').value});token=d.token;user=d.user;localStorage.setItem('tok',token);localStorage.setItem('user',JSON.stringify(user));await show()}catch(e){err(e)}};
+$('logoutBtn').onclick=()=>{token=null;localStorage.clear();show()};
+$('createGroupBtn').onclick=async()=>{try{const g=await api('POST','/api/groups',{name:$('groupName').value});group=g.id;await show()}catch(e){err(e)}};
+$('groupSel').onchange=()=>{group=$('groupSel').value;loadGroup().catch(err)};
+$('addMemberBtn').onclick=async()=>{try{await api('POST','/api/groups/'+group+'/members',{email:$('memberEmail').value});await loadGroup()}catch(e){err(e)}};
+$('expDate').value=new Date().toISOString().slice(0,10);
+$('addExpenseBtn').onclick=async()=>{try{const g=await api('GET','/api/groups/'+group);
+ await api('POST','/api/groups/'+group+'/expenses',{description:$('expDesc').value,amountCents:Math.round(parseFloat($('expAmount').value)*100),paidBy:+$('expPaidBy').value,date:$('expDate').value,split:{type:'equal',participants:g.members.map(m=>({userId:m.id}))}});await loadGroup()}catch(e){err(e)}};
+show().catch(e=>{token=null;localStorage.clear();show()});
+</script></body></html>

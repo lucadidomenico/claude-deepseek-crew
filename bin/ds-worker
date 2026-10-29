@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# ds-worker — delegate a coding task to a Claude Code session running on DeepSeek V4.1 Flash
+#              affida un compito a una sessione Claude Code che gira su DeepSeek V4.1 Flash
+#   ds-worker "task"                 new developer session in the current dir / nuova sessione nella cartella corrente
+#   ds-worker -f task.md             task read from a file / compito letto da file
+#   ds-worker --resume wNN "text"    more work for an earlier developer, keeps its context / stesso sviluppatore, stesso contesto
+# Logs in ./.crew/ (task, transcript, session id). Prints the developer's report / stampa il report dello sviluppatore.
+set -uo pipefail
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+. "$HERE/ds-i18n.sh"
+LOGDIR="${CREW_LOG_DIR:-$PWD/.crew}"; mkdir -p "$LOGDIR"
+RESUME=""; TASK=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --resume) RESUME="$2"; shift 2;;
+    -f) TASK="$(cat "$2")"; shift 2;;
+    -h|--help) sed -n '2,7p' "$0"; exit 0;;
+    *) TASK="$1"; shift;;
+  esac
+done
+[ -z "$TASK" ] && { t "ds-worker: compito vuoto" "ds-worker: empty task" >&2; exit 2; }
+exec 9>"$LOGDIR/.lock"; flock 9
+N=$(( $(ls "$LOGDIR" | grep -c '^w[0-9]*\.jsonl$') + 1 )); ID=$(printf 'w%02d' "$N"); : > "$LOGDIR/$ID.jsonl"
+flock -u 9
+EXTRA=()
+if [ -n "$RESUME" ]; then
+  SID=$(cat "$LOGDIR/$RESUME.sid" 2>/dev/null) || { t "ds-worker: sviluppatore sconosciuto: $RESUME" "ds-worker: unknown developer: $RESUME" >&2; exit 2; }
+  EXTRA=(--resume "$SID")
+fi
+{ printf '%s\n' "$TASK"; [ -n "$RESUME" ] && echo "resume-of: $RESUME"; } > "$LOGDIR/$ID.task.md"
+SYS="You are a software developer working on a task assigned by a tech lead. Work autonomously: nobody will answer questions. Implement the task completely, run the relevant tests/commands to verify your work, and do not stop until it is done. When finished, reply with a concise report: what you changed (files), how you verified it (commands + results), and anything left open or uncertain. Stop any server you started before finishing. Stay inside the project directory. Write the report in the language of the task."
+T0=$(date +%s)
+(
+  . "$HERE/ds-env.sh"
+  # the task goes through stdin, not argv, so `pkill -f <text>` elsewhere cannot match this process
+  printf '%s' "$TASK" | timeout "${CREW_WORKER_TIMEOUT:-2700}" claude -p "${EXTRA[@]}" --permission-mode bypassPermissions \
+    --disallowedTools "$CREW_DISALLOWED" --append-system-prompt "$SYS" \
+    --output-format stream-json --verbose > "$LOGDIR/$ID.jsonl" 2> "$LOGDIR/$ID.err"
+)
+RC=$?
+python3 "$HERE/ds-cost" --report "$LOGDIR/$ID.jsonl" "$LOGDIR/$ID.sid" "$ID" "$RC" "$(( $(date +%s) - T0 ))"

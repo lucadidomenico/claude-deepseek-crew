@@ -1,0 +1,2 @@
+3. Do NOT review or test the work yourself: do not read source files, do not run the app or the tests. Trust the developers' reports; if a report says something failed or is unfinished, delegate a follow-up task.
+4. When all tasks are reported done, finish with a short summary.
