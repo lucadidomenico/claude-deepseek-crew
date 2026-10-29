@@ -26,6 +26,10 @@ Per confronto ho misurato anche Sonnet 5.5 e DeepSeek da solo: i loro risultati 
   Ogni suite è stata validata su un'implementazione di riferimento indipendente (100%).
 - **Stesso prompt per ogni configurazione.** Ogni sessione gira con `claude -p --safe-mode --permission-mode bypassPermissions`
   e gli strumenti web disattivati. Ogni run ha il suo PID namespace, così i run in parallelo non possono interferire tra loro.
+- **Prompt del benchmark, non la skill.** Nei run il lead riceveva le istruzioni da tech lead dai prompt in
+  [`benchmark/prompts/`](../benchmark/prompts) (in inglese: `lead-common` più `lead-noreview` o `lead-review`), non dal comando
+  `/deepseek-crew`. La skill l'ho scritta dopo, partendo da quei prompt e con la stessa logica. I numeri qui sotto sono
+  stati misurati con i prompt.
 - **Quota Claude** = token reali dai transcript delle sessioni, valorizzati al listino API di Anthropic. È la misura più fine
   disponibile del consumo del piano: l'endpoint del piano riporta solo punti percentuali interi.
 - **Costo DeepSeek** = token reali registrati da un proxy, al listino DeepSeek. Il totale calcolato coincide con il saldo

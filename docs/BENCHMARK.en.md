@@ -26,6 +26,10 @@ I also measured Sonnet 5.5 and DeepSeek alone, for comparison: their results are
   independent reference implementation (100%).
 - **Same prompt for every setup.** Every session runs `claude -p --safe-mode --permission-mode bypassPermissions` with web
   tools off. Each run gets its own PID namespace, so runs executing in parallel cannot interfere.
+- **Benchmark prompts, not the skill.** In the runs the lead got its tech-lead instructions from the prompts in
+  [`benchmark/prompts/`](../benchmark/prompts) (`lead-common` plus `lead-noreview` or `lead-review`), not from the
+  `/deepseek-crew` command. I wrote the skill afterwards, starting from those prompts and with the same logic. The numbers
+  below were measured with the prompts.
 - **Claude usage** = real token counts from the session transcripts, priced at Anthropic API list prices. This is the
   finest-grained measure of plan usage available: the plan endpoint only reports whole percentage points.
 - **DeepSeek cost** = real tokens logged by a proxy, at DeepSeek list prices. The computed total matched the account balance within 1%.
